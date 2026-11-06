@@ -128,6 +128,25 @@ const routes = [
     },
   },
   {
+    path: '/podcasts',
+    name: 'podcasts',
+    component: () => import('@/views/podcasts.vue'),
+    meta: {
+      keepAlive: true,
+      savePosition: true,
+    },
+  },
+  {
+    path: '/podcast/:id',
+    name: 'podcast',
+    component: () => import('@/views/podcast.vue'),
+  },
+  {
+    path: '/cached',
+    name: 'cachedTracks',
+    component: () => import('@/views/cachedTracks.vue'),
+  },
+  {
     path: '/lastfm/callback',
     name: 'lastfmCallback',
     component: () => import('@/views/lastfmCallback.vue'),

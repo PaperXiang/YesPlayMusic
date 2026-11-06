@@ -13,6 +13,7 @@ Vue.use(VueI18n);
 
 const i18n = new VueI18n({
   locale: store.state.settings.lang,
+  fallbackLocale: 'en',
   messages: {
     en,
     'zh-CN': zhCN,

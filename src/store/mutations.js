@@ -1,3 +1,4 @@
+import Vue from 'vue';
 import shortcuts from '@/utils/shortcuts';
 import cloneDeep from 'lodash/cloneDeep';
 
@@ -21,7 +22,8 @@ export default {
     state.settings.outputDevice = deviceId;
   },
   updateSettings(state, { key, value }) {
-    state.settings[key] = value;
+    // 用 Vue.set，老用户设置里没有的新字段也能触发界面更新
+    Vue.set(state.settings, key, value);
   },
   updateData(state, { key, value }) {
     state.data[key] = value;
@@ -68,6 +70,9 @@ export default {
   },
   restoreDefaultShortcuts(state) {
     state.settings.shortcuts = cloneDeep(shortcuts);
+  },
+  updateDesktopLyricOn(state, on) {
+    state.desktopLyricOn = on;
   },
   enableScrolling(state, status = null) {
     state.enableScrolling = status ? status : !state.enableScrolling;

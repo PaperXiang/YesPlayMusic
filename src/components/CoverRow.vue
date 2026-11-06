@@ -91,6 +91,21 @@ export default {
         return `${albumType} · ${new Date(item.publishTime).getFullYear()}`;
       }
       if (this.subText === 'appleMusic') return 'by Apple Music';
+      if (this.subText === 'podcast') {
+        // 内容来自用户（主播昵称），通过 v-html 渲染前必须转义
+        const text = item.dj?.nickname || item.rcmdtext || item.category || '';
+        return String(text).replace(
+          /[&<>"']/g,
+          c =>
+            ({
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;',
+            }[c])
+        );
+      }
     },
     isPrivacy(item) {
       return this.type === 'playlist' && item.privacy === 10;

@@ -6,7 +6,18 @@ import { getPlaylistDetail, intelligencePlaylist } from '@/api/playlist';
 import { getLyric, getMP3, getTrackDetail, scrobble } from '@/api/track';
 import store from '@/store';
 import { isAccountLoggedIn } from '@/utils/auth';
-import { cacheTrackSource, getTrackSource } from '@/utils/db';
+import {
+  cacheTrackDetails,
+  cacheTrackSource,
+  getTrackSource,
+} from '@/utils/db';
+import { podcastPrograms } from '@/api/podcast';
+import {
+  PODCAST_FINISHED,
+  getPodcastProgress,
+  programToTrack,
+  setPodcastProgress,
+} from '@/utils/podcast';
 import { isCreateMpris, isCreateTray } from '@/utils/platform';
 import { Howl, Howler } from 'howler';
 import shuffle from 'lodash/shuffle';
@@ -39,6 +50,8 @@ const excludeSaveKeys = [
   '_playing',
   '_personalFMLoading',
   '_personalFMNextLoading',
+  '_sleepTimerEndAt',
+  '_sleepAfterCurrentTrack',
 ];
 
 function setTitle(track) {
@@ -70,6 +83,9 @@ export default class {
     this._volumeBeforeMuted = 1; // 用于保存静音前的音量
     this._personalFMLoading = false; // 是否正在私人FM中加载新的track
     this._personalFMNextLoading = false; // 是否正在缓存私人FM的下一首歌曲
+    this._playbackRate = 1; // 播放速度
+    this._sleepTimerEndAt = 0; // 睡眠定时结束的时间戳，0 表示未开启
+    this._sleepAfterCurrentTrack = false; // 播完当前歌曲后停止
 
     // 播放信息
     this._list = []; // 播放列表
@@ -93,10 +109,25 @@ export default class {
      */
     this.createdBlobRecords = [];
 
+    // 音量均衡：每首歌的响度补偿（dB）和 Web Audio 处理链，均不保存到 localStorage
+    this._trackGain = new Map();
+    this._audioGraph = null;
+    Object.defineProperty(this, '_trackGain', { enumerable: false });
+    Object.defineProperty(this, '_audioGraph', {
+      enumerable: false,
+      writable: true,
+    });
+
     // howler (https://github.com/goldfire/howler.js)
     this._howler = null;
     Object.defineProperty(this, '_howler', {
       enumerable: false,
+    });
+
+    this._sleepTimeout = null;
+    Object.defineProperty(this, '_sleepTimeout', {
+      enumerable: false,
+      writable: true,
     });
 
     // init
@@ -208,6 +239,39 @@ export default class {
       }
     }
   }
+  get playbackRate() {
+    return this._playbackRate;
+  }
+  set playbackRate(rate) {
+    this._playbackRate = rate;
+    this._howler?.rate(rate);
+    this._updateMediaSessionPositionState();
+  }
+  get sleepTimerEndAt() {
+    return this._sleepTimerEndAt;
+  }
+  get sleepAfterCurrentTrack() {
+    return this._sleepAfterCurrentTrack;
+  }
+  /**
+   * 设置睡眠定时
+   * @param {number|'endOfTrack'} minutes 分钟数；0 关闭；'endOfTrack' 播完当前歌曲后停止
+   */
+  setSleepTimer(minutes) {
+    clearTimeout(this._sleepTimeout);
+    this._sleepTimeout = null;
+    this._sleepTimerEndAt = 0;
+    this._sleepAfterCurrentTrack = false;
+    if (minutes === 'endOfTrack') {
+      this._sleepAfterCurrentTrack = true;
+    } else if (minutes > 0) {
+      this._sleepTimerEndAt = Date.now() + minutes * 60 * 1000;
+      this._sleepTimeout = setTimeout(() => {
+        this._sleepTimerEndAt = 0;
+        this.pause();
+      }, minutes * 60 * 1000);
+    }
+  }
   get isCurrentTrackLiked() {
     return store.state.liked.songs.includes(this.currentTrack.id);
   }
@@ -253,6 +317,9 @@ export default class {
       if (this._howler === null) return;
       this._progress = this._howler.seek();
       localStorage.setItem('playerCurrentTrackTime', this._progress);
+      if (this._currentTrack.podcast && this._playing && this._progress > 0) {
+        setPodcastProgress(this._currentTrack.id, Math.floor(this._progress));
+      }
       if (isCreateMpris) {
         ipcRenderer?.send('playerCurrentTrackTime', this._progress);
       }
@@ -326,6 +393,7 @@ export default class {
     });
     if (
       store.state.lastfm.key !== undefined &&
+      !track.podcast &&
       (time >= trackDuration / 2 || time >= 240)
     ) {
       const timestamp = ~~(new Date().getTime() / 1000) - time;
@@ -346,6 +414,7 @@ export default class {
       html5: true,
       preload: true,
       format: ['mp3', 'flac'],
+      rate: this._playbackRate || 1,
       onend: () => {
         this._nextTrackCallback();
       },
@@ -380,7 +449,71 @@ export default class {
       }
       setTrayLikeState(store.state.liked.songs.includes(this.currentTrack.id));
     }
+    this.applyVolumeNormalization();
     this.setOutputDevice();
+    this._resumePodcastProgress();
+  }
+  /**
+   * 音量均衡（仅桌面版）。
+   * 网易云的 /song/url 会返回 gain（dB），表示把这首歌调到统一响度需要的增益。
+   * 处理链：<audio> → GainNode(gain) → 限幅器 → MediaStreamDestination → 输出用的 <audio>。
+   * 最后一级单独用一个 <audio> 输出，是为了继续支持“输出设备”设置（Electron 13 的
+   * AudioContext 还不能 setSinkId）。从未开启过时不建立处理链，播放路径与原来完全一致。
+   */
+  applyVolumeNormalization() {
+    if (process.env.IS_ELECTRON !== true) return;
+    const enabled = store.state.settings.volumeNormalization === true;
+    if (!enabled && !this._audioGraph) return;
+    const node = this._howler?._sounds[0]?._node;
+    if (!node) return;
+    try {
+      const graph = this._getAudioGraph();
+      // 一个 <audio> 只能创建一次 MediaElementSource；Howler 会复用 html5 音频池里的节点
+      if (!node._ypmSource) {
+        node._ypmSource = graph.ctx.createMediaElementSource(node);
+        node._ypmSource.connect(graph.gain);
+      }
+      const gainDb = enabled
+        ? this._trackGain.get(this._currentTrack.id) ?? 0
+        : 0;
+      // 正增益最多 +6dB，余量交给限幅器，避免削波
+      graph.gain.gain.value = Math.pow(10, Math.min(gainDb, 6) / 20);
+      if (graph.ctx.state === 'suspended') graph.ctx.resume();
+      if (graph.output.paused) graph.output.play().catch(() => {});
+    } catch (error) {
+      console.debug('[debug][Player.js] volume normalization failed', error);
+    }
+  }
+  _getAudioGraph() {
+    if (this._audioGraph) return this._audioGraph;
+    const ctx = new AudioContext();
+    const gain = ctx.createGain();
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -1;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    const destination = ctx.createMediaStreamDestination();
+    gain.connect(limiter);
+    limiter.connect(destination);
+    const output = new Audio();
+    output.srcObject = destination.stream;
+    this._audioGraph = { ctx, gain, limiter, output };
+    this.setOutputDevice();
+    return this._audioGraph;
+  }
+  _resumePodcastProgress() {
+    const track = this._currentTrack;
+    if (!track.podcast) return;
+    const saved = getPodcastProgress(track.id);
+    const duration = (track.dt || 0) / 1000;
+    if (saved > 5 && (!duration || saved < duration - 5)) {
+      const howler = this._howler;
+      howler.once('load', () => {
+        if (this._howler === howler) howler.seek(saved);
+      });
+    }
   }
   _getAudioSourceBlobURL(data) {
     // Create a new object URL.
@@ -402,6 +535,7 @@ export default class {
   _getAudioSourceFromCache(id) {
     return getTrackSource(id).then(t => {
       if (!t) return null;
+      if (typeof t.gain === 'number') this._trackGain.set(Number(id), t.gain);
       return this._getAudioSourceBlobURL(t.source);
     });
   }
@@ -412,8 +546,10 @@ export default class {
         if (!result.data[0].url) return null;
         if (result.data[0].freeTrialInfo !== null) return null; // 跳过只能试听的歌曲
         const source = result.data[0].url.replace(/^http:/, 'https:');
+        const gain = result.data[0].gain;
+        if (typeof gain === 'number') this._trackGain.set(track.id, gain);
         if (store.state.settings.automaticallyCacheSongs) {
-          cacheTrackSource(track, source, result.data[0].br);
+          cacheTrackSource(track, source, result.data[0].br, 'netease', gain);
         }
         return source;
       });
@@ -668,13 +804,23 @@ export default class {
     if ('setPositionState' in navigator.mediaSession) {
       navigator.mediaSession.setPositionState({
         duration: ~~(this.currentTrack.dt / 1000),
-        playbackRate: 1.0,
+        playbackRate: this._playbackRate || 1,
         position: this.seek(),
       });
     }
   }
   _nextTrackCallback() {
     this._scrobble(this._currentTrack, 0, true);
+    if (this._currentTrack.podcast) {
+      setPodcastProgress(this._currentTrack.id, PODCAST_FINISHED);
+    }
+    if (this._sleepAfterCurrentTrack) {
+      this._sleepAfterCurrentTrack = false;
+      this._setPlaying(false);
+      setTitle(null);
+      this._pauseDiscordPresence(this._currentTrack);
+      return;
+    }
     if (!this.isPersonalFM && this.repeatMode === 'one') {
       this._replaceCurrentTrack(this.currentTrackID);
     } else {
@@ -843,7 +989,7 @@ export default class {
         setTitle(this._currentTrack);
       }
       this._playDiscordPresence(this._currentTrack, this.seek());
-      if (store.state.lastfm.key !== undefined) {
+      if (store.state.lastfm.key !== undefined && !this.currentTrack.podcast) {
         trackUpdateNowPlaying({
           artist: this.currentTrack.ar[0].name,
           track: this.currentTrack.name,
@@ -881,6 +1027,13 @@ export default class {
     }
   }
   setOutputDevice() {
+    // 开启过音量均衡后，声音从处理链末端的 <audio> 输出
+    if (this._audioGraph) {
+      this._audioGraph.output
+        .setSinkId(store.state.settings.outputDevice)
+        .catch(() => {});
+      return;
+    }
     if (this._howler?._sounds.length <= 0 || !this._howler?._sounds[0]._node) {
       return;
     }
@@ -921,6 +1074,27 @@ export default class {
     getPlaylistDetail(id, noCache).then(data => {
       let trackIDs = data.playlist.trackIds.map(t => t.id);
       this.replacePlaylist(trackIDs, id, 'playlist', trackID);
+    });
+  }
+  /**
+   * 播放播客节目列表
+   * @param {Object[]} programs /dj/program 返回的节目
+   * @param {number} radioId 播客 id
+   */
+  async playPodcastPrograms(programs, radioId, trackID = 'first') {
+    const tracks = programs.map(programToTrack).filter(t => t.id);
+    if (tracks.length === 0) return;
+    await cacheTrackDetails(tracks);
+    this.replacePlaylist(
+      tracks.map(t => t.id),
+      `/podcast/${radioId}`,
+      'url',
+      trackID
+    );
+  }
+  playPodcastByID(id, trackID = 'first') {
+    podcastPrograms({ rid: id, limit: 100 }).then(data => {
+      this.playPodcastPrograms(data.programs ?? [], id, trackID);
     });
   }
   playArtistByID(id, trackID = 'first') {

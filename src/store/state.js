@@ -13,6 +13,7 @@ updateApp();
 export default {
   showLyrics: false,
   enableScrolling: true,
+  desktopLyricOn: false,
   title: 'YesPlayMusic',
   liked: {
     songs: [],

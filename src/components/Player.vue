@@ -48,7 +48,7 @@
               </span>
             </div>
           </div>
-          <div class="like-button">
+          <div v-if="!currentTrack.podcast" class="like-button">
             <button-icon
               :title="
                 player.isCurrentTrackLiked
@@ -167,6 +167,77 @@
             </div>
           </div>
 
+          <div class="more-menu-wrapper">
+            <button-icon
+              class="more-button"
+              :class="{ active: sleepTimerActive || player.playbackRate !== 1 }"
+              :title="sleepTimerText || $t('player.more')"
+              @mousedown.native.prevent
+              @click.native="toggleMoreMenu"
+              ><svg-icon icon-class="more"
+            /></button-icon>
+            <div
+              v-if="showMoreMenu"
+              ref="moreMenu"
+              class="more-menu"
+              tabindex="-1"
+              @blur="showMoreMenu = false"
+            >
+              <div class="group-title">{{ $t('player.playbackRate') }}</div>
+              <div class="chips">
+                <div
+                  v-for="rate in playbackRates"
+                  :key="'rate' + rate"
+                  class="chip"
+                  :class="{ active: player.playbackRate === rate }"
+                  @click="player.playbackRate = rate"
+                  >{{ rate }}x</div
+                >
+              </div>
+              <hr />
+              <div class="group-title">
+                {{ $t('player.sleepTimer') }}
+                <span v-if="sleepTimerText" class="subtitle">{{
+                  sleepTimerText
+                }}</span>
+              </div>
+              <div
+                v-for="minutes in sleepOptions"
+                :key="'sleep' + minutes"
+                class="item"
+                @click="setSleepTimer(minutes)"
+                >{{ $t('player.sleepMinutes', { n: minutes }) }}</div
+              >
+              <div
+                class="item"
+                :class="{ checked: player.sleepAfterCurrentTrack }"
+                @click="setSleepTimer('endOfTrack')"
+                >{{ $t('player.sleepEndOfTrack') }}</div
+              >
+              <div
+                v-if="sleepTimerActive"
+                class="item"
+                @click="setSleepTimer(0)"
+                >{{ $t('player.sleepOff') }}</div
+              >
+              <template v-if="isElectron">
+                <hr />
+                <div
+                  class="item"
+                  :class="{ checked: desktopLyricOn }"
+                  @click="toggleDesktopLyric"
+                  >{{ $t('player.desktopLyric') }}</div
+                >
+                <div
+                  v-if="desktopLyricOn"
+                  class="item"
+                  :class="{ checked: settings.desktopLyricLocked }"
+                  @click="toggleDesktopLyricLock"
+                  >{{ $t('player.desktopLyricLock') }}</div
+                >
+              </template>
+            </div>
+          </div>
           <button-icon
             class="lyrics-button"
             title="歌词"
@@ -198,6 +269,12 @@ export default {
   data() {
     return {
       mouseDownTarget: null,
+      showMoreMenu: false,
+      playbackRates: [0.75, 1, 1.25, 1.5, 2],
+      sleepOptions: [15, 30, 60, 90],
+      now: Date.now(),
+      nowTicker: null,
+      isElectron: process.env.IS_ELECTRON === true,
     };
   },
   computed: {
@@ -216,6 +293,24 @@ export default {
     playing() {
       return this.player.playing;
     },
+    desktopLyricOn() {
+      return this.$store.state.desktopLyricOn;
+    },
+    sleepTimerActive() {
+      return (
+        this.player.sleepTimerEndAt > 0 || this.player.sleepAfterCurrentTrack
+      );
+    },
+    sleepTimerText() {
+      if (this.player.sleepAfterCurrentTrack) {
+        return this.$t('player.sleepEndOfTrack');
+      }
+      if (this.player.sleepTimerEndAt <= 0) return '';
+      const left = Math.max(0, (this.player.sleepTimerEndAt - this.now) / 1000);
+      return this.$t('player.sleepRemaining', {
+        time: formatTrackTime(left),
+      });
+    },
     audioSource() {
       return this.player._howler?._src.includes('kuwo.cn')
         ? '音源来自酷我音乐'
@@ -225,9 +320,13 @@ export default {
   mounted() {
     this.setupMediaControls();
     window.addEventListener('keydown', this.handleKeydown);
+    this.nowTicker = setInterval(() => {
+      this.now = Date.now();
+    }, 1000);
   },
   beforeDestroy() {
     window.removeEventListener('keydown', this.handleKeydown);
+    clearInterval(this.nowTicker);
   },
   methods: {
     ...mapMutations(['toggleLyrics']),
@@ -290,6 +389,27 @@ export default {
     mute() {
       this.player.mute();
     },
+    toggleMoreMenu() {
+      this.now = Date.now();
+      this.showMoreMenu = !this.showMoreMenu;
+      if (this.showMoreMenu) this.$nextTick(() => this.$refs.moreMenu?.focus());
+    },
+    setSleepTimer(minutes) {
+      this.player.setSleepTimer(minutes);
+      this.now = Date.now();
+      this.showMoreMenu = false;
+    },
+    toggleDesktopLyricLock() {
+      this.$store.commit('updateSettings', {
+        key: 'desktopLyricLocked',
+        value: !this.settings.desktopLyricLocked,
+      });
+      this.showMoreMenu = false;
+    },
+    toggleDesktopLyric() {
+      window.require('electron').ipcRenderer.send('toggleDesktopLyric');
+      this.showMoreMenu = false;
+    },
 
     setupMediaControls() {
       if ('mediaSession' in navigator) {
@@ -328,6 +448,108 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.more-menu-wrapper {
+  position: relative;
+  margin-left: 4px;
+}
+
+.more-menu {
+  // 外观与 ContextMenu.vue（右键菜单）保持一致
+  position: absolute;
+  bottom: 52px;
+  right: -8px;
+  width: 220px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 6px 12px -4px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(12px);
+  border-radius: 12px;
+  box-sizing: border-box;
+  padding: 6px;
+  z-index: 1000;
+  user-select: none;
+  -webkit-app-region: no-drag;
+  &:focus {
+    outline: none;
+  }
+  hr {
+    margin: 4px 10px;
+    background: rgba(128, 128, 128, 0.18);
+    height: 1px;
+    box-shadow: none;
+    border: none;
+  }
+  .group-title {
+    padding: 10px 14px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text);
+    opacity: 0.68;
+    .subtitle {
+      margin-left: 6px;
+      color: var(--color-primary);
+    }
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    padding: 2px 4px;
+  }
+  .item,
+  .chip {
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 8px;
+    cursor: default;
+    color: var(--color-text);
+    &:hover {
+      color: var(--color-primary);
+      background: var(--color-primary-bg-for-transparent);
+      transition: opacity 125ms ease-out, transform 125ms ease-out;
+    }
+    &:active {
+      opacity: 0.75;
+      transform: scale(0.95);
+    }
+  }
+  .item {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    &.checked::after {
+      content: '✓';
+      margin-left: auto;
+      color: var(--color-primary);
+    }
+  }
+  .chip {
+    padding: 6px 8px;
+    &.active {
+      color: var(--color-primary);
+      background: var(--color-primary-bg-for-transparent);
+    }
+  }
+}
+
+[data-theme='dark'] {
+  .more-menu {
+    background: rgba(36, 36, 36, 0.78);
+    backdrop-filter: blur(16px) contrast(120%) brightness(60%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.08);
+    .item:hover,
+    .chip:hover {
+      color: var(--color-text);
+    }
+  }
+}
+
+@supports (-moz-appearance: none) {
+  .more-menu {
+    background-color: var(--color-body-bg) !important;
+  }
+}
+
 .player {
   position: fixed;
   bottom: 0;

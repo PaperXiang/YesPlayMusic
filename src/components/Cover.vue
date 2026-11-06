@@ -78,6 +78,7 @@ export default {
         album: player.playAlbumByID,
         playlist: player.playPlaylistByID,
         artist: player.playArtistByID,
+        podcast: player.playPodcastByID,
       };
       playActions[this.type].bind(player)(this.id);
     },

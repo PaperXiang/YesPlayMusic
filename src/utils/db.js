@@ -90,7 +90,13 @@ async function deleteExcessCache() {
   }
 }
 
-export function cacheTrackSource(trackInfo, url, bitRate, from = 'netease') {
+export function cacheTrackSource(
+  trackInfo,
+  url,
+  bitRate,
+  from = 'netease',
+  gain = null
+) {
   if (!process.env.IS_ELECTRON) return;
   const name = trackInfo.name;
   const artist =
@@ -114,6 +120,7 @@ export function cacheTrackSource(trackInfo, url, bitRate, from = 'netease') {
         source: response.data,
         bitRate,
         from,
+        gain, // 网易云提供的响度补偿（dB），用于音量均衡
         name,
         artist,
         createTime: new Date().getTime(),
@@ -220,4 +227,38 @@ export function clearDB() {
     });
     resolve();
   });
+}
+
+// 已缓存歌曲列表：按缓存时间倒序，只取主键，避免把音频数据整个读进内存
+export async function getCachedTracks() {
+  const ids = await db.trackSources
+    .orderBy('createTime')
+    .reverse()
+    .primaryKeys();
+  const details = await db.trackDetail.bulkGet(ids);
+  return ids.map((id, i) => ({
+    id,
+    detail: details[i]?.detail,
+    privileges: details[i]?.privileges,
+  }));
+}
+
+export async function deleteCachedTrack(id) {
+  const track = await db.trackSources.get(Number(id));
+  if (!track) return;
+  await db.trackSources.delete(Number(id));
+  tracksCacheBytes -= track.source?.byteLength || 0;
+}
+
+// 批量写入歌曲详情（播客节目没有完整的歌曲详情，需要先写入本地再交给播放器）
+export function cacheTrackDetails(tracks) {
+  const now = new Date().getTime();
+  return db.trackDetail.bulkPut(
+    tracks.map(track => ({
+      id: track.id,
+      detail: track,
+      privileges: track.privilege,
+      updateTime: now,
+    }))
+  );
 }

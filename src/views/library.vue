@@ -96,6 +96,9 @@
           >
             {{ $t('library.playHistory.title') }}
           </div>
+          <div v-if="isElectron" class="tab" @click="$router.push('/cached')">
+            {{ $t('library.cachedTracks') }}
+          </div>
         </div>
         <button
           v-show="currentTab === 'playlists'"
@@ -251,6 +254,9 @@ export default {
     };
   },
   computed: {
+    isElectron() {
+      return process.env.IS_ELECTRON === true;
+    },
     ...mapState(['data', 'liked']),
     /**
      * @returns {string[]}

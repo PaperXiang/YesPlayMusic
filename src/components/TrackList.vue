@@ -58,6 +58,12 @@
         @click="removeTrackFromCloudDisk"
         >从云盘中删除</div
       >
+      <div
+        v-if="extraContextMenuItem.includes('removeTrackFromCache')"
+        class="item"
+        @click="removeTrackFromCache"
+        >从缓存中删除</div
+      >
     </ContextMenu>
 
     <div :style="listStyles">
@@ -75,6 +81,7 @@
 </template>
 
 <script>
+import { deleteCachedTrack } from '@/utils/db';
 import { mapActions, mapMutations, mapState } from 'vuex';
 import { addOrRemoveTrackFromPlaylist } from '@/api/playlist';
 import { cloudDiskTrackDelete } from '@/api/user';
@@ -211,6 +218,9 @@ export default {
       } else if (this.dbclickTrackFunc === 'dailyTracks') {
         let trackIDs = this.tracks.map(t => t.id);
         this.player.replacePlaylist(trackIDs, '/daily/songs', 'url', trackID);
+      } else if (this.dbclickTrackFunc === 'cachedTracks') {
+        let trackIDs = this.tracks.map(t => t.id);
+        this.player.replacePlaylist(trackIDs, '/cached', 'url', trackID);
       } else if (this.dbclickTrackFunc === 'playCloudDisk') {
         let trackIDs = this.tracks.map(t => t.id || t.songId);
         this.player.replacePlaylist(trackIDs, this.id, 'cloudDisk', trackID);
@@ -287,6 +297,12 @@ export default {
       this.$store.state.player.removeTrackFromQueue(
         this.rightClickedTrackIndex
       );
+    },
+    removeTrackFromCache() {
+      const trackID = this.rightClickedTrack.id;
+      deleteCachedTrack(trackID).then(() => {
+        this.$parent.removeTrack(trackID);
+      });
     },
     removeTrackFromCloudDisk() {
       if (confirm(`确定要从云盘删除 ${this.rightClickedTrack.songName}？`)) {

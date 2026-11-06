@@ -18,6 +18,19 @@ export function ipcRenderer(vueInstance) {
   // inside this Vue instance, according to what path the main process requires.
   // responds to Menu click() events at the main process and changes the route accordingly.
 
+  ipcRenderer.on('desktopLyricSetting', (event, { key, value }) => {
+    const allowed = [
+      'desktopLyricFontSize',
+      'desktopLyricLocked',
+      'desktopLyricWidth',
+    ];
+    if (allowed.includes(key)) store.commit('updateSettings', { key, value });
+  });
+
+  ipcRenderer.on('desktopLyricState', (event, on) => {
+    store.commit('updateDesktopLyricOn', on);
+  });
+
   ipcRenderer.on('changeRouteTo', (event, path) => {
     self.$router.push(path);
     if (store.state.showLyrics) {

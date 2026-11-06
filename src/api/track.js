@@ -47,7 +47,8 @@ export function getTrackDetail(ids) {
     }).then(data => {
       data.songs.map(song => {
         const privileges = data.privileges.find(t => t.id === song.id);
-        cacheTrackDetail(song, privileges);
+        // 播客节目的音频在歌曲详情接口里没有名字，不能覆盖本地写入的节目信息
+        if (song.name) cacheTrackDetail(song, privileges);
       });
       data.songs = mapTrackPlayableStatus(data.songs, data.privileges);
       return data;

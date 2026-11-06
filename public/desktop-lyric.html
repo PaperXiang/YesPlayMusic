@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>YesPlayMusic Lyric</title>
+    <style>
+      :root {
+        --lyric-color: #ffffff;
+        --font-size: 34px;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+        font-family: 'Barlow', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+          'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+      }
+      .panel {
+        position: absolute;
+        inset: 0;
+        border-radius: 14px;
+        transition: background 0.2s;
+        cursor: move;
+      }
+      body.hover:not(.locked) .panel {
+        background: rgba(0, 0, 0, 0.42);
+      }
+
+      /* 工具栏：悬停时显示 */
+      .toolbar {
+        position: absolute;
+        top: 4px;
+        left: 0;
+        right: 0;
+        height: 26px;
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+      }
+      body.hover:not(.locked) .toolbar {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .toolbar button,
+      .unlock {
+        width: 26px;
+        height: 26px;
+        border: none;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.14);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 26px;
+        padding: 0;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .toolbar button:hover,
+      .unlock:hover {
+        background: rgba(255, 255, 255, 0.28);
+      }
+      .toolbar svg,
+      .unlock svg {
+        width: 14px;
+        height: 14px;
+        vertical-align: -2px;
+      }
+      /* 锁定后只在悬停时露出解锁按钮 */
+      .unlock {
+        position: absolute;
+        top: 4px;
+        left: 50%;
+        margin-left: -13px;
+        display: none;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      body.locked .unlock {
+        display: block;
+      }
+      body.locked.hover .unlock {
+        opacity: 1;
+      }
+
+      .lines {
+        position: absolute;
+        top: 32px;
+        left: 24px;
+        right: 24px;
+        bottom: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        pointer-events: none;
+      }
+      .row {
+        width: 100%;
+        overflow: hidden;
+        text-align: center;
+        white-space: nowrap;
+      }
+      .row.main {
+        font-size: var(--font-size);
+        line-height: 1.35;
+        font-weight: 700;
+      }
+      .row.sub {
+        font-size: calc(var(--font-size) * 0.6);
+        line-height: 1.5;
+        font-weight: 600;
+      }
+      .line {
+        position: relative;
+        display: inline-block;
+        will-change: transform;
+      }
+      .line.enter {
+        animation: enter 0.32s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      }
+      @keyframes enter {
+        from {
+          opacity: 0;
+          transform: translateY(45%);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .text {
+        color: rgba(255, 255, 255, 0.72);
+        text-shadow: 0 0 1px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.75),
+          0 2px 10px rgba(0, 0, 0, 0.45);
+      }
+      /* 已唱部分：同一行文字叠一层，用 clip-path 按进度裁剪 */
+      .fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: var(--lyric-color);
+        clip-path: inset(0 100% 0 0);
+        text-shadow: 0 0 6px rgba(0, 0, 0, 0.25);
+      }
+      .main.static .text {
+        color: var(--lyric-color);
+      }
+      .main.static .fill {
+        display: none;
+      }
+      .sub .text {
+        color: var(--lyric-color);
+        opacity: 0.86;
+      }
+      .sub.next .text {
+        color: rgba(255, 255, 255, 0.72);
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel" id="panel"></div>
+    <div class="toolbar" id="toolbar">
+      <button data-action="smaller" title="缩小字体">A-</button>
+      <button data-action="bigger" title="放大字体">A+</button>
+      <button data-action="lock" title="锁定">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+        >
+          <rect x="5" y="11" width="14" height="10" rx="2" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+      </button>
+      <button data-action="close" title="关闭桌面歌词">✕</button>
+    </div>
+    <button class="unlock" id="unlock" title="解锁">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.4"
+        stroke-linecap="round"
+      >
+        <rect x="5" y="11" width="14" height="10" rx="2" />
+        <path d="M8 11V7a4 4 0 0 1 7.5-2" />
+      </svg>
+    </button>
+    <div class="lines">
+      <div class="row main static" id="mainRow">
+        <span class="line" id="mainLine"
+          ><span class="text" id="mainText">YesPlayMusic</span
+          ><span class="text fill" id="mainFill">YesPlayMusic</span></span
+        >
+      </div>
+      <div class="row sub" id="subRow">
+        <span class="line" id="subLine"
+          ><span class="text" id="subText"></span
+        ></span>
+      </div>
+    </div>
+    <script>
+      const { ipcRenderer } = require('electron');
+      const $ = id => document.getElementById(id);
+      const mainRow = $('mainRow');
+      const mainLine = $('mainLine');
+      const mainText = $('mainText');
+      const mainFill = $('mainFill');
+      const subRow = $('subRow');
+      const subLine = $('subLine');
+      const subText = $('subText');
+      const unlockBtn = $('unlock');
+
+      let style = { fontSize: 34, showTranslation: true, locked: false };
+      let state = null; // 最近一次同步的数据
+      let receivedAt = 0;
+      let lineKey = '';
+
+      const restartAnimation = el => {
+        el.classList.remove('enter');
+        void el.offsetWidth;
+        el.classList.add('enter');
+      };
+
+      function render() {
+        if (!state) return;
+        const key = `${state.trackID}|${state.index}|${state.lyric}`;
+        const changed = key !== lineKey;
+        lineKey = key;
+
+        mainText.textContent = state.lyric || '♪';
+        mainFill.textContent = state.lyric || '♪';
+        // 没有时间信息（无歌词时显示歌名）就不做进度染色
+        mainRow.classList.toggle(
+          'static',
+          !(state.index >= 0 && state.end > state.start)
+        );
+
+        const useTranslation = style.showTranslation && state.translation;
+        subText.textContent = useTranslation
+          ? state.translation
+          : state.next || '';
+        subRow.classList.toggle('next', !useTranslation);
+
+        if (changed) {
+          mainLine.style.transform = '';
+          restartAnimation(mainLine);
+          restartAnimation(subLine);
+        }
+      }
+
+      function currentTime() {
+        if (!state) return 0;
+        const elapsed = state.playing
+          ? ((performance.now() - receivedAt) / 1000) * (state.rate || 1)
+          : 0;
+        return state.progress + elapsed;
+      }
+
+      // 每帧根据插值后的播放时间更新进度染色和长句滚动
+      function frame() {
+        if (state && state.index >= 0 && state.end > state.start) {
+          const p = Math.min(
+            1,
+            Math.max(
+              0,
+              (currentTime() - state.start) / (state.end - state.start)
+            )
+          );
+          mainFill.style.clipPath = `inset(0 ${(1 - p) * 100}% 0 0)`;
+          // 句子比窗口宽时，随进度横向滚动，保证正在唱的部分可见
+          const overflow = mainLine.scrollWidth - mainRow.clientWidth;
+          if (overflow > 0 && !mainLine.classList.contains('enter-running')) {
+            const t = Math.min(1, Math.max(0, (p - 0.15) / 0.7));
+            mainLine.style.transform = `translateX(${-overflow * t}px)`;
+          } else {
+            mainLine.style.transform = '';
+          }
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+
+      mainLine.addEventListener('animationstart', () =>
+        mainLine.classList.add('enter-running')
+      );
+      mainLine.addEventListener('animationend', () =>
+        mainLine.classList.remove('enter-running')
+      );
+
+      ipcRenderer.on('sync', (_, payload) => {
+        state = payload;
+        receivedAt = performance.now();
+        render();
+      });
+
+      ipcRenderer.on('style', (_, s) => {
+        style = s;
+        document.documentElement.style.setProperty(
+          '--font-size',
+          `${Number(s.fontSize) || 34}px`
+        );
+        document.documentElement.style.setProperty(
+          '--lyric-color',
+          s.color || '#fff'
+        );
+        document.body.classList.toggle('locked', !!s.locked);
+        render();
+      });
+
+      // 悬停：窗口未锁定时正常收到事件；锁定时 forward 的 mousemove 也能收到
+      document.addEventListener('mousemove', e => {
+        document.body.classList.add('hover');
+        if (style.locked) {
+          const r = unlockBtn.getBoundingClientRect();
+          const over =
+            e.clientX >= r.left &&
+            e.clientX <= r.right &&
+            e.clientY >= r.top &&
+            e.clientY <= r.bottom;
+          ipcRenderer.send('desktopLyricIgnoreMouse', !over);
+        }
+      });
+      document.addEventListener('mouseleave', () => {
+        document.body.classList.remove('hover');
+        if (style.locked) ipcRenderer.send('desktopLyricIgnoreMouse', true);
+      });
+
+      // 拖动：按下后由主进程跟随鼠标移动窗口
+      const panel = $('panel');
+      panel.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || style.locked) return;
+        panel.setPointerCapture(e.pointerId);
+        ipcRenderer.send('desktopLyricDragStart');
+      });
+      const endDrag = () => ipcRenderer.send('desktopLyricDragEnd');
+      panel.addEventListener('pointerup', endDrag);
+      panel.addEventListener('lostpointercapture', endDrag);
+      window.addEventListener('blur', endDrag);
+
+      const setSetting = (key, value) =>
+        ipcRenderer.send('desktopLyricSetting', { key, value });
+      $('toolbar').addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        // 与设置页的字号选项保持一致
+        const SIZES = [24, 28, 34, 42, 52, 64];
+        const size = Number(style.fontSize) || 34;
+        const smaller = SIZES.filter(n => n < size).pop() || SIZES[0];
+        const bigger = SIZES.find(n => n > size) || SIZES[SIZES.length - 1];
+        switch (btn.dataset.action) {
+          case 'smaller':
+            setSetting('desktopLyricFontSize', smaller);
+            break;
+          case 'bigger':
+            setSetting('desktopLyricFontSize', bigger);
+            break;
+          case 'lock':
+            setSetting('desktopLyricLocked', true);
+            break;
+          case 'close':
+            ipcRenderer.send('desktopLyricClose');
+            break;
+        }
+      });
+      unlockBtn.addEventListener('click', () =>
+        setSetting('desktopLyricLocked', false)
+      );
+    </script>
+  </body>
+</html>

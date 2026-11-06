@@ -455,6 +455,12 @@ export default {
     currentTrack() {
       this.getLyric();
       this.getCoverColor();
+      if (ipcRenderer && this.currentTrack?.name) {
+        ipcRenderer.send('updateLyric', {
+          lyric: this.currentTrack.name,
+          translation: this.currentTrack.ar?.map(a => a.name).join(' / '),
+        });
+      }
     },
     showLyrics(show) {
       if (show) {
@@ -694,11 +700,43 @@ export default {
             if (currentLyricLine && currentLyricLine.contents) {
               // 只发送第一行歌词（原文），避免显示过长
               const lyricText = currentLyricLine.contents[0] || '';
-              ipcRenderer.send('updateLyric', { lyric: lyricText });
+              ipcRenderer.send('updateLyric', {
+                lyric: lyricText,
+                translation: currentLyricLine.contents[1] || '',
+              });
             }
           }
         }
+        this.syncDesktopLyric(
+          oldHighlightLyricIndex !== this.highlightLyricIndex,
+          progress
+        );
       }, 50);
+    },
+    /**
+     * 把当前行和播放进度同步给桌面歌词窗口。
+     * 换行时立即发送，其余时间每 250ms 校准一次，窗口内部用动画插值。
+     */
+    syncDesktopLyric(lineChanged, progress) {
+      if (!ipcRenderer || !this.$store.state.desktopLyricOn) return;
+      this.desktopLyricTick = (this.desktopLyricTick || 0) + 1;
+      if (!lineChanged && this.desktopLyricTick % 5 !== 0) return;
+      const index = this.highlightLyricIndex;
+      const line = this.lyricToShow[index];
+      const nextLine = this.lyricToShow[index + 1];
+      const duration = (this.currentTrack?.dt || 0) / 1000;
+      ipcRenderer.send('desktopLyricSync', {
+        trackID: this.currentTrack?.id,
+        index,
+        lyric: line?.contents?.[0] ?? this.currentTrack?.name ?? '',
+        translation: line?.contents?.[1] || '',
+        next: nextLine?.contents?.[0] || '',
+        start: this.lyric[index]?.time ?? 0,
+        end: this.lyric[index + 1]?.time ?? duration,
+        progress,
+        playing: this.player.playing,
+        rate: this.player.playbackRate || 1,
+      });
     },
     moveToFMTrash() {
       this.player.moveToFMTrash();

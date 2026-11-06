@@ -156,6 +156,25 @@
           </select>
         </div>
       </div>
+      <div v-if="isElectron" class="item">
+        <div class="left">
+          <div class="title">{{ $t('settings.volumeNormalization.text') }}</div>
+          <div class="description">{{
+            $t('settings.volumeNormalization.desc')
+          }}</div>
+        </div>
+        <div class="right">
+          <div class="toggle">
+            <input
+              id="volume-normalization"
+              v-model="volumeNormalization"
+              type="checkbox"
+              name="volume-normalization"
+            />
+            <label for="volume-normalization"></label>
+          </div>
+        </div>
+      </div>
 
       <h3 v-if="isElectron">{{ $t('settings.cache') }}</h3>
       <div v-if="isElectron" class="item">
@@ -205,6 +224,9 @@
           >
         </div>
         <div class="right">
+          <button style="margin-right: 8px" @click="$router.push('/cached')">
+            {{ $t('cachedTracks.title') }}
+          </button>
           <button @click="clearCache()">
             {{ $t('settings.clearSongsCache') }}
           </button>
@@ -313,6 +335,113 @@
       </div>
 
       <section v-if="isElectron" class="unm-configuration">
+        <template v-if="isElectron">
+          <h3>{{ $t('settings.desktopLyric.title') }}</h3>
+          <div class="item">
+            <div class="left">
+              <div class="title">{{ $t('settings.desktopLyric.enable') }}</div>
+            </div>
+            <div class="right">
+              <div class="toggle">
+                <input
+                  id="desktop-lyric-on"
+                  v-model="desktopLyricOn"
+                  type="checkbox"
+                  name="desktop-lyric-on"
+                />
+                <label for="desktop-lyric-on"></label>
+              </div>
+            </div>
+          </div>
+          <div class="item">
+            <div class="left">
+              <div class="title">{{
+                $t('settings.desktopLyric.fontSize')
+              }}</div>
+            </div>
+            <div class="right">
+              <select v-model.number="desktopLyricFontSize">
+                <option
+                  v-for="size in [24, 28, 34, 42, 52, 64]"
+                  :key="size"
+                  :value="size"
+                >
+                  {{ size }}px
+                </option>
+              </select>
+            </div>
+          </div>
+          <div class="item">
+            <div class="left">
+              <div class="title">{{ $t('settings.desktopLyric.width') }}</div>
+            </div>
+            <div class="right">
+              <select v-model.number="desktopLyricWidth">
+                <option
+                  v-for="width in [600, 800, 1000, 1200, 1400]"
+                  :key="width"
+                  :value="width"
+                >
+                  {{ width }}px
+                </option>
+              </select>
+            </div>
+          </div>
+          <div class="item">
+            <div class="left">
+              <div class="title">{{ $t('settings.desktopLyric.color') }}</div>
+            </div>
+            <div class="right">
+              <select v-model="desktopLyricColor">
+                <option
+                  v-for="color in desktopLyricColors"
+                  :key="color.value"
+                  :value="color.value"
+                >
+                  {{ $t(`settings.desktopLyric.colors.${color.name}`) }}
+                </option>
+              </select>
+            </div>
+          </div>
+          <div class="item">
+            <div class="left">
+              <div class="title">{{
+                $t('settings.desktopLyric.showTranslation')
+              }}</div>
+            </div>
+            <div class="right">
+              <div class="toggle">
+                <input
+                  id="desktop-lyric-translation"
+                  v-model="desktopLyricShowTranslation"
+                  type="checkbox"
+                  name="desktop-lyric-translation"
+                />
+                <label for="desktop-lyric-translation"></label>
+              </div>
+            </div>
+          </div>
+          <div class="item">
+            <div class="left">
+              <div class="title">{{ $t('settings.desktopLyric.lock') }}</div>
+              <div class="description">{{
+                $t('settings.desktopLyric.lockDesc')
+              }}</div>
+            </div>
+            <div class="right">
+              <div class="toggle">
+                <input
+                  id="desktop-lyric-locked"
+                  v-model="desktopLyricLocked"
+                  type="checkbox"
+                  name="desktop-lyric-locked"
+                />
+                <label for="desktop-lyric-locked"></label>
+              </div>
+            </div>
+          </div>
+        </template>
+
         <h3>UnblockNeteaseMusic</h3>
         <div class="item">
           <div class="left">
@@ -824,12 +953,28 @@ const electron =
 const ipcRenderer =
   process.env.IS_ELECTRON === true ? electron.ipcRenderer : null;
 
+const DESKTOP_LYRIC_DEFAULTS = {
+  desktopLyricFontSize: 34,
+  desktopLyricWidth: 800,
+  desktopLyricColor: '#ffffff',
+  desktopLyricShowTranslation: true,
+  desktopLyricLocked: false,
+};
+
 const validShortcutCodes = ['=', '-', '~', '[', ']', ';', "'", ',', '.', '/'];
 
 export default {
   name: 'Settings',
   data() {
     return {
+      desktopLyricColors: [
+        { name: 'white', value: '#ffffff' },
+        { name: 'blue', value: '#8ab4ff' },
+        { name: 'green', value: '#5fe3a1' },
+        { name: 'yellow', value: '#ffd86b' },
+        { name: 'pink', value: '#ff8fb1' },
+        { name: 'purple', value: '#c49bff' },
+      ],
       tracksCache: {
         size: '0KB',
         length: 0,
@@ -1088,6 +1233,97 @@ export default {
       set(value) {
         this.$store.commit('updateSettings', {
           key: 'lyricsBackground',
+          value,
+        });
+      },
+    },
+    volumeNormalization: {
+      get() {
+        return this.settings.volumeNormalization === true;
+      },
+      set(value) {
+        this.$store.commit('updateSettings', {
+          key: 'volumeNormalization',
+          value,
+        });
+        // 立即作用于当前歌曲
+        this.player.applyVolumeNormalization();
+      },
+    },
+    desktopLyricOn: {
+      get() {
+        return this.$store.state.desktopLyricOn;
+      },
+      set() {
+        window.require('electron').ipcRenderer.send('toggleDesktopLyric');
+      },
+    },
+    desktopLyricWidth: {
+      get() {
+        return (
+          this.settings.desktopLyricWidth ??
+          DESKTOP_LYRIC_DEFAULTS.desktopLyricWidth
+        );
+      },
+      set(value) {
+        this.$store.commit('updateSettings', {
+          key: 'desktopLyricWidth',
+          value,
+        });
+      },
+    },
+    desktopLyricFontSize: {
+      get() {
+        return (
+          this.settings.desktopLyricFontSize ??
+          DESKTOP_LYRIC_DEFAULTS.desktopLyricFontSize
+        );
+      },
+      set(value) {
+        this.$store.commit('updateSettings', {
+          key: 'desktopLyricFontSize',
+          value,
+        });
+      },
+    },
+    desktopLyricColor: {
+      get() {
+        return (
+          this.settings.desktopLyricColor ??
+          DESKTOP_LYRIC_DEFAULTS.desktopLyricColor
+        );
+      },
+      set(value) {
+        this.$store.commit('updateSettings', {
+          key: 'desktopLyricColor',
+          value,
+        });
+      },
+    },
+    desktopLyricShowTranslation: {
+      get() {
+        return (
+          this.settings.desktopLyricShowTranslation ??
+          DESKTOP_LYRIC_DEFAULTS.desktopLyricShowTranslation
+        );
+      },
+      set(value) {
+        this.$store.commit('updateSettings', {
+          key: 'desktopLyricShowTranslation',
+          value,
+        });
+      },
+    },
+    desktopLyricLocked: {
+      get() {
+        return (
+          this.settings.desktopLyricLocked ??
+          DESKTOP_LYRIC_DEFAULTS.desktopLyricLocked
+        );
+      },
+      set(value) {
+        this.$store.commit('updateSettings', {
+          key: 'desktopLyricLocked',
           value,
         });
       },

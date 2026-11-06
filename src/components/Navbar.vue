@@ -21,6 +21,11 @@
           >{{ $t('nav.explore') }}</router-link
         >
         <router-link
+          to="/podcasts"
+          :class="{ active: ['podcasts', 'podcast'].includes($route.name) }"
+          >{{ $t('nav.podcast') }}</router-link
+        >
+        <router-link
           to="/library"
           :class="{ active: $route.name === 'library' }"
           >{{ $t('nav.library') }}</router-link

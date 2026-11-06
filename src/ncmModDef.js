@@ -619,4 +619,34 @@ module.exports = [
     route: '/api',
     module: require('@neteaseapireborn/api/module/api'),
   },
+  {
+    identifier: 'dj_hot',
+    route: '/dj/hot',
+    module: require('@neteaseapireborn/api/module/dj_hot'),
+  },
+  {
+    identifier: 'dj_recommend',
+    route: '/dj/recommend',
+    module: require('@neteaseapireborn/api/module/dj_recommend'),
+  },
+  {
+    identifier: 'dj_sublist',
+    route: '/dj/sublist',
+    module: require('@neteaseapireborn/api/module/dj_sublist'),
+  },
+  {
+    identifier: 'dj_detail',
+    route: '/dj/detail',
+    module: require('@neteaseapireborn/api/module/dj_detail'),
+  },
+  {
+    identifier: 'dj_program',
+    route: '/dj/program',
+    module: require('@neteaseapireborn/api/module/dj_program'),
+  },
+  {
+    identifier: 'dj_sub',
+    route: '/dj/sub',
+    module: require('@neteaseapireborn/api/module/dj_sub'),
+  },
 ];
